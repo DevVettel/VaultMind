@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Database (contains sensitive data)
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment & secrets
+.env
+*.key
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Build / packaging
+dist/
+build/
+*.egg-info/
+*.spec
+
+# IDEs
+.idea/
+.vscode/
+
+# Claude Code
+.claude/
+
+# Project internals
+issues/
+docs/vaultmind_project_knowledge.md
+
+# OS
+Thumbs.db
+.DS_Store
