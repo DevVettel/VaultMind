@@ -105,10 +105,10 @@ def get_categories() -> list[str]:
 
 
 def search_passwords(query: str) -> list[sqlite3.Row]:
-    like = f"%{query}%"
+    like = f"%{query.lower()}%"
     with get_connection() as conn:
         return conn.execute(
-            "SELECT * FROM passwords WHERE title LIKE ? OR username LIKE ? OR category LIKE ? ORDER BY title",
+            "SELECT * FROM passwords WHERE LOWER(title) LIKE ? OR LOWER(username) LIKE ? OR LOWER(category) LIKE ? ORDER BY title",
             (like, like, like)
         ).fetchall()
 
