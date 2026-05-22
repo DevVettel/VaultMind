@@ -1,11 +1,13 @@
 import threading
+import webbrowser
 from datetime import datetime
 
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem,
     QToolBar, QAction, QStatusBar, QLineEdit, QLabel,
-    QMessageBox, QHeaderView, QAbstractItemView, QFrame, QApplication
+    QMessageBox, QHeaderView, QAbstractItemView, QFrame, QApplication,
+    QPushButton, QSizePolicy
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt5.QtGui import QFont, QColor
@@ -127,7 +129,33 @@ QLabel#sidebar_header {
     letter-spacing: 1px;
     padding: 10px 18px 6px 18px;
 }
+QPushButton#fav_btn {
+    background-color: transparent;
+    border: none;
+    font-size: 18px;
+    padding: 2px 4px;
+}
+QPushButton#url_btn {
+    background-color: transparent;
+    border: none;
+    font-size: 15px;
+    color: #5b8dee;
+    padding: 2px 4px;
+}
+QPushButton#url_btn:hover {
+    color: #7ba7f5;
+}
 """
+
+
+def _cell_widget(btn: QPushButton) -> QWidget:
+    container = QWidget()
+    container.setStyleSheet("background: transparent;")
+    layout = QHBoxLayout(container)
+    layout.setAlignment(Qt.AlignCenter)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.addWidget(btn)
+    return container
 
 
 class _Signals(QObject):
@@ -176,10 +204,6 @@ class MainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(0)
 
-        cat_header = QLabel("CATEGORIES")
-        cat_header.setObjectName("sidebar_header")
-        sidebar_layout.addWidget(cat_header)
-
         self.category_list = QListWidget()
         self.category_list.currentItemChanged.connect(self._on_category_changed)
         sidebar_layout.addWidget(self.category_list)
@@ -192,12 +216,16 @@ class MainWindow(QMainWindow):
         table_layout.setSpacing(0)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["Title", "Username", "Category", "Updated"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(["", "Title", "Username", "Category", "Updated", ""])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
+        self.table.setColumnWidth(0, 44)
+        self.table.setColumnWidth(5, 44)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -253,11 +281,6 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
 
         spacer = QWidget()
-        spacer.setSizePolicy(
-            spacer.sizePolicy().horizontalPolicy(),
-            spacer.sizePolicy().verticalPolicy()
-        )
-        from PyQt5.QtWidgets import QSizePolicy
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         tb.addWidget(spacer)
 
@@ -273,7 +296,7 @@ class MainWindow(QMainWindow):
 
     def _setup_inactivity_timer(self):
         self._inactivity_timer = QTimer(self)
-        self._inactivity_timer.setInterval(5 * 60 * 1000)  # 5 minutes
+        self._inactivity_timer.setInterval(5 * 60 * 1000)
         self._inactivity_timer.timeout.connect(self._lock_vault)
         self._inactivity_timer.start()
 
@@ -300,26 +323,53 @@ class MainWindow(QMainWindow):
         self.category_list.blockSignals(True)
         self.category_list.clear()
 
-        items = ["All"] + database.get_categories()
-        for cat in items:
-            item = QListWidgetItem(cat)
+        header_font = QFont()
+        header_font.setPointSize(9)
+        header_font.setBold(True)
+
+        def add_section_header(text):
+            item = QListWidgetItem(f"  {text}")
+            item.setFlags(Qt.NoItemFlags)
+            item.setFont(header_font)
+            item.setForeground(QColor("#64748b"))
+            self.category_list.addItem(item)
+
+        add_section_header("SMART VIEWS")
+        for key, display in [("All", "All"), ("Favorites", "★  Favorites"), ("Recent", "⏱  Recent")]:
+            item = QListWidgetItem(f"   {display}")
+            item.setData(Qt.UserRole, key)
+            self.category_list.addItem(item)
+            if key == self.current_category:
+                self.category_list.setCurrentItem(item)
+
+        sep = QListWidgetItem()
+        sep.setFlags(Qt.NoItemFlags)
+        sep.setBackground(QColor("#2a2a3e"))
+        self.category_list.addItem(sep)
+
+        add_section_header("CATEGORIES")
+        for cat in database.get_categories():
+            item = QListWidgetItem(f"   {cat}")
+            item.setData(Qt.UserRole, cat)
             self.category_list.addItem(item)
             if cat == self.current_category:
                 self.category_list.setCurrentItem(item)
 
         if self.category_list.currentItem() is None:
-            self.category_list.setCurrentRow(0)
+            self.category_list.setCurrentRow(1)
 
         self.category_list.blockSignals(False)
 
     def _on_category_changed(self, current, _previous):
         if current:
-            self.current_category = current.text()
-            self.current_search = ""
-            self.search_box.blockSignals(True)
-            self.search_box.clear()
-            self.search_box.blockSignals(False)
-            self._refresh_table()
+            name = current.data(Qt.UserRole)
+            if name is not None:
+                self.current_category = name
+                self.current_search = ""
+                self.search_box.blockSignals(True)
+                self.search_box.clear()
+                self.search_box.blockSignals(False)
+                self._refresh_table()
 
     def _on_search(self, text: str):
         self._reset_inactivity()
@@ -336,16 +386,47 @@ class MainWindow(QMainWindow):
         self._row_ids = []
 
         for i, row in enumerate(rows):
-            self._row_ids.append(row["id"])
-            self.table.setItem(i, 0, QTableWidgetItem(row["title"]))
-            self.table.setItem(i, 1, QTableWidgetItem(row["username"]))
-            self.table.setItem(i, 2, QTableWidgetItem(row["category"]))
+            rid = row["id"]
+            self._row_ids.append(rid)
+
+            # Col 0: favorite toggle button
+            is_fav = bool(row["is_favorite"])
+            fav_btn = QPushButton("★" if is_fav else "☆")
+            fav_btn.setObjectName("fav_btn")
+            fav_btn.setFixedSize(32, 32)
+            fav_btn.setStyleSheet(
+                f"color: {'#f59e0b' if is_fav else '#4a5568'};"
+                "background: transparent; border: none; font-size: 18px;"
+            )
+            fav_btn.clicked.connect(lambda _checked, r=rid: self._toggle_favorite(r))
+            self.table.setCellWidget(i, 0, _cell_widget(fav_btn))
+
+            # Cols 1-4: text data
+            self.table.setItem(i, 1, QTableWidgetItem(row["title"]))
+            self.table.setItem(i, 2, QTableWidgetItem(row["username"]))
+            self.table.setItem(i, 3, QTableWidgetItem(row["category"]))
             dt = row["updated_at"][:10] if row["updated_at"] else ""
-            self.table.setItem(i, 3, QTableWidgetItem(dt))
+            self.table.setItem(i, 4, QTableWidgetItem(dt))
+
+            # Col 5: URL open button (only if URL is set)
+            url = row["url"] or ""
+            if url:
+                url_btn = QPushButton("🔗")
+                url_btn.setObjectName("url_btn")
+                url_btn.setFixedSize(32, 32)
+                url_btn.setToolTip(url)
+                url_btn.clicked.connect(lambda _checked, u=url: webbrowser.open(u))
+                self.table.setCellWidget(i, 5, _cell_widget(url_btn))
+            else:
+                self.table.removeCellWidget(i, 5)
 
         count = database.count_passwords()
         self.status_label.setText(f"  {count} password{'s' if count != 1 else ''} stored")
         self._selection_label.setText("")
+
+    def _toggle_favorite(self, record_id: int):
+        database.toggle_favorite(record_id)
+        self._refresh_table()
 
     def _selected_row_id(self):
         rows = self.table.selectedItems()
@@ -358,8 +439,8 @@ class MainWindow(QMainWindow):
 
     def _on_selection_changed(self):
         row_idx = self.table.currentRow()
-        if row_idx >= 0 and self.table.item(row_idx, 0):
-            title = self.table.item(row_idx, 0).text()
+        if row_idx >= 0 and self.table.item(row_idx, 1):
+            title = self.table.item(row_idx, 1).text()
             self._selection_label.setText(f"  ·  {title} selected")
         else:
             self._selection_label.setText("")
@@ -408,7 +489,10 @@ class MainWindow(QMainWindow):
         dlg = AddPasswordDialog(self.enc_key, parent=self)
         if dlg.exec_() == dlg.Accepted and dlg.result_data:
             d = dlg.result_data
-            database.add_password(d["title"], d["username"], d["encrypted_password"], d["category"])
+            database.add_password(
+                d["title"], d["username"], d["encrypted_password"], d["category"],
+                d.get("url", ""), d.get("notes", "")
+            )
             self._refresh_sidebar()
             self._refresh_table()
 
@@ -427,7 +511,10 @@ class MainWindow(QMainWindow):
         dlg = AddPasswordDialog(self.enc_key, record=record, parent=self)
         if dlg.exec_() == dlg.Accepted and dlg.result_data:
             d = dlg.result_data
-            database.update_password(rec_id, d["title"], d["username"], d["encrypted_password"], d["category"])
+            database.update_password(
+                rec_id, d["title"], d["username"], d["encrypted_password"], d["category"],
+                d.get("url", ""), d.get("notes", "")
+            )
             self._refresh_sidebar()
             self._refresh_table()
 
@@ -438,7 +525,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No Selection", "Please select a password to delete.")
             return
 
-        title = self.table.item(self.table.currentRow(), 0).text()
+        title = self.table.item(self.table.currentRow(), 1).text()
         reply = QMessageBox.question(
             self, "Confirm Delete",
             f"Delete password for '{title}'?\nThis action cannot be undone.",
@@ -465,6 +552,7 @@ class MainWindow(QMainWindow):
         try:
             plain = encryption.decrypt(record["encrypted_password"], self.enc_key)
             pyperclip.copy(plain)
+            database.update_last_used(rec_id)
             self._show_copy_toast()
 
             if self._clipboard_timer:
@@ -476,7 +564,6 @@ class MainWindow(QMainWindow):
                         pyperclip.copy("")
                 except Exception:
                     pass
-                self._signals.lock_vault.emit if False else None
 
             self._clipboard_timer = threading.Timer(30, clear_clipboard)
             self._clipboard_timer.daemon = True

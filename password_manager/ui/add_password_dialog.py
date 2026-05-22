@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QSlider, QCheckBox, QFrame,
-    QProgressBar, QMessageBox, QSizePolicy
+    QProgressBar, QMessageBox, QSizePolicy, QTextEdit
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
@@ -153,6 +153,17 @@ QFrame#separator {
     background-color: #3d3d5c;
     max-height: 1px;
 }
+QTextEdit {
+    background-color: #2a2a3e;
+    color: #e2e8f0;
+    border: 1px solid #3d3d5c;
+    border-radius: 5px;
+    padding: 9px 12px;
+    font-size: 14px;
+}
+QTextEdit:focus {
+    border: 1px solid #072182;
+}
 """
 
 
@@ -172,7 +183,7 @@ class AddPasswordDialog(QDialog):
         title_text = "Edit Password" if self.record else "Add Password"
         self.setWindowTitle(f"VaultMind — {title_text}")
         self.setFixedWidth(540)
-        self.setMinimumHeight(600)
+        self.setMinimumHeight(700)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 24, 28, 24)
@@ -261,6 +272,20 @@ class AddPasswordDialog(QDialog):
             "}"
         )
         layout.addWidget(self.category_combo)
+
+        # URL
+        layout.addWidget(QLabel("URL"))
+        self.url_input = QLineEdit()
+        self.url_input.setPlaceholderText("https://...")
+        layout.addWidget(self.url_input)
+
+        # Notes
+        layout.addWidget(QLabel("Notes"))
+        self.notes_input = QTextEdit()
+        self.notes_input.setPlaceholderText("Optional notes...")
+        self.notes_input.setMinimumHeight(80)
+        self.notes_input.setMaximumHeight(120)
+        layout.addWidget(self.notes_input)
 
         layout.addWidget(self._sep())
 
@@ -408,6 +433,11 @@ class AddPasswordDialog(QDialog):
         idx = self.category_combo.findText(record["category"])
         if idx >= 0:
             self.category_combo.setCurrentIndex(idx)
+        try:
+            self.url_input.setText(record["url"] or "")
+            self.notes_input.setPlainText(record["notes"] or "")
+        except (IndexError, KeyError):
+            pass
 
     def _save(self):
         from core.encryption import encrypt
@@ -432,6 +462,8 @@ class AddPasswordDialog(QDialog):
             "username": username,
             "encrypted_password": encrypted,
             "category": category,
+            "url": self.url_input.text().strip(),
+            "notes": self.notes_input.toPlainText().strip(),
         }
         self.accept()
 
