@@ -1,10 +1,33 @@
 import sqlite3
 import os
+import sys
+import shutil
 from datetime import datetime
 from typing import Optional
 
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "vaultmind.db")
+def _default_data_dir() -> str:
+    home = os.path.expanduser("~")
+    if sys.platform == "darwin":
+        return os.path.join(home, "Library", "Application Support", "VaultMind")
+    if sys.platform == "win32":
+        return os.path.join(os.environ.get("APPDATA", home), "VaultMind")
+    return os.path.join(os.environ.get("XDG_DATA_HOME", os.path.join(home, ".local", "share")), "VaultMind")
+
+
+def _resolve_db_path() -> str:
+    legacy_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "vaultmind.db")
+    data_dir = _default_data_dir()
+    db_path = os.path.join(data_dir, "vaultmind.db")
+
+    os.makedirs(data_dir, exist_ok=True)
+    if os.path.exists(legacy_path) and not os.path.exists(db_path):
+        shutil.copy2(legacy_path, db_path)
+
+    return db_path
+
+
+DB_PATH = _resolve_db_path()
 
 
 def get_connection() -> sqlite3.Connection:

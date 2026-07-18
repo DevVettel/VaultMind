@@ -1,8 +1,11 @@
+import sys
 import ctypes
 import ctypes.wintypes
 
 
 def apply_dark_titlebar(widget):
+    if sys.platform != "win32":
+        return
     try:
         hwnd = int(widget.winId())
         DWMWA_CAPTION_COLOR = 35

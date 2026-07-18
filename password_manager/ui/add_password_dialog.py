@@ -38,7 +38,7 @@ QLineEdit:focus, QComboBox:focus {
     border: 1px solid #072182;
 }
 QLineEdit#mono {
-    font-family: Consolas, monospace;
+    font-family: "SF Mono", Menlo, Consolas, "Courier New", monospace;
     font-size: 15px;
     letter-spacing: 1px;
 }

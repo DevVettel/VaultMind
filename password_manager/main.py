@@ -13,13 +13,25 @@ from ui.master_password_dialog import MasterPasswordDialog
 from ui.main_window import MainWindow
 
 
+def _default_ui_font() -> QFont:
+    if sys.platform == "darwin":
+        families = [".AppleSystemUIFont", "SF Pro Text", "Helvetica Neue"]
+    elif sys.platform == "win32":
+        families = ["Segoe UI"]
+    else:
+        families = ["Ubuntu", "Cantarell", "DejaVu Sans"]
+
+    font = QFont(families[0], 10)
+    font.setFamilies(families)
+    return font
+
+
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("VaultMind")
     app.setOrganizationName("VaultMind")
 
-    font = QFont("Segoe UI", 10)
-    app.setFont(font)
+    app.setFont(_default_ui_font())
 
     app.setStyle("Fusion")
 

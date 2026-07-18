@@ -4,7 +4,7 @@
 </h1>
 
 <p align="center">
-  A secure, fully offline password manager for Windows — built with Python and PyQt5.
+  A secure, fully offline password manager for Windows and macOS — built with Python and PyQt5.
 </p>
 
 <p align="center">
@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/PyQt5-5.15%2B-41cd52?style=flat-square"/>
   <img src="https://img.shields.io/badge/Encryption-AES--256-072182?style=flat-square"/>
   <img src="https://img.shields.io/badge/Storage-Local%20only-lightgrey?style=flat-square"/>
-  <img src="https://img.shields.io/badge/Platform-Windows-0078d4?style=flat-square&logo=windows"/>
+  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-0078d4?style=flat-square"/>
 </p>
 
 ---
@@ -40,6 +40,8 @@ VaultMind stores and encrypts all your credentials locally on your machine. No c
 
 ## Installation
 
+**Windows**
+
 ```bash
 # 1. Clone the repository
 git clone https://github.com/DevVettel/VaultMind.git
@@ -56,7 +58,28 @@ pip install -r requirements.txt
 python password_manager/main.py
 ```
 
-**Requirements:** Python 3.10+, Windows 10/11
+**macOS**
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/DevVettel/VaultMind.git
+cd VaultMind
+
+# 2. Create a virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Run
+python password_manager/main.py
+```
+
+**Requirements:** Python 3.10+, Windows 10/11 or macOS 11+ (Apple Silicon & Intel)
+
+> On macOS the vault is stored at `~/Library/Application Support/VaultMind/vaultmind.db`
+> (on Windows: `%APPDATA%\VaultMind\vaultmind.db`) instead of inside the project folder.
 
 ---
 
