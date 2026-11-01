@@ -1,16 +1,29 @@
-import sys
 import os
+import sys
 
 # Ensure package root is on sys.path when running directly
 sys.path.insert(0, os.path.dirname(__file__))
 
-from PyQt5.QtWidgets import QApplication, QMessageBox
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import QSize
 from PyQt5.QtGui import QFont, QIcon
+from PyQt5.QtWidgets import QApplication
 
-from core import database, encryption
-from ui.master_password_dialog import MasterPasswordDialog
+from core import database, vault
+from resources import ICON_SIZES, asset_path
 from ui.main_window import MainWindow
+from ui.master_password_dialog import MasterPasswordDialog
+from version import __version__
+
+
+def _app_icon() -> QIcon:
+    """Multi-resolution app icon so Qt picks a sharp bitmap for every context
+    (title bar, taskbar, Alt+Tab, macOS Dock on Retina displays)."""
+    icon = QIcon()
+    for size in ICON_SIZES:
+        path = asset_path("icons", f"icon-{size}.png")
+        if os.path.exists(path):
+            icon.addFile(path, QSize(size, size))
+    return icon
 
 
 def _default_ui_font() -> QFont:
@@ -30,39 +43,25 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("VaultMind")
     app.setOrganizationName("VaultMind")
+    app.setApplicationVersion(__version__)
 
     app.setFont(_default_ui_font())
 
     app.setStyle("Fusion")
 
-    _docs = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "docs"))
-    app_icon = QIcon()
-    app_icon.addFile(os.path.join(_docs, "icon-1.png"))  # 32x32 — title bar / taskbar
-    app_icon.addFile(os.path.join(_docs, "icon-0.png"))  # 48x48 — large icons / Alt+Tab
-    app.setWindowIcon(app_icon)
+    app.setWindowIcon(_app_icon())
 
     database.initialize_db()
 
-    first_launch = database.is_first_launch()
-    dlg = MasterPasswordDialog(is_first_launch=first_launch)
+    first_launch = vault.is_first_launch()
+    dlg = MasterPasswordDialog(
+        is_first_launch=first_launch,
+        unlock=vault.create_vault if first_launch else vault.unlock_vault,
+    )
     if dlg.exec_() != dlg.Accepted:
         sys.exit(0)
 
-    master_password = dlg.master_password
-
-    if first_launch:
-        salt = encryption.generate_salt()
-        pwd_hash = encryption.hash_password(master_password, salt)
-        database.store_master_credentials(salt, pwd_hash)
-    else:
-        salt, stored_hash = database.get_master_credentials()
-        if not encryption.verify_password(master_password, salt, stored_hash):
-            QMessageBox.critical(None, "Wrong Password", "Incorrect master password. Exiting.")
-            sys.exit(1)
-
-    enc_key = encryption.derive_key(master_password, salt)
-
-    window = MainWindow(enc_key)
+    window = MainWindow(dlg.enc_key)
     window.show()
 
     sys.exit(app.exec_())

@@ -1,9 +1,9 @@
-import sqlite3
 import os
-import sys
 import shutil
+import sqlite3
+import sys
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Tuple
 
 
 def _default_data_dir() -> str:
@@ -16,6 +16,11 @@ def _default_data_dir() -> str:
 
 
 def _resolve_db_path() -> str:
+    override = os.environ.get("VAULTMIND_DB_PATH")
+    if override:
+        os.makedirs(os.path.dirname(os.path.abspath(override)), exist_ok=True)
+        return override
+
     legacy_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "vaultmind.db")
     data_dir = _default_data_dir()
     db_path = os.path.join(data_dir, "vaultmind.db")
@@ -27,11 +32,18 @@ def _resolve_db_path() -> str:
     return db_path
 
 
-DB_PATH = _resolve_db_path()
+DB_PATH: Optional[str] = None
+
+
+def get_db_path() -> str:
+    global DB_PATH
+    if DB_PATH is None:
+        DB_PATH = _resolve_db_path()
+    return DB_PATH
 
 
 def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(get_db_path())
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -79,24 +91,26 @@ def is_first_launch() -> bool:
         return row is None
 
 
-def store_master_credentials(salt: bytes, password_hash: str):
+def store_master_credentials(salt: bytes, verifier: str):
+    """Store the salt and verifier token; drops any legacy password hash."""
     with get_connection() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES ('salt', ?)",
             (salt.hex(),)
         )
         conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES ('hash', ?)",
-            (password_hash,)
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('verifier', ?)",
+            (verifier,)
         )
+        conn.execute("DELETE FROM meta WHERE key='hash'")
         conn.commit()
 
 
-def get_master_credentials() -> tuple[bytes, str]:
+def get_master_credentials() -> Tuple[bytes, Optional[str], Optional[str]]:
+    """Return (salt, verifier, legacy_hash); either of the last two may be None."""
     with get_connection() as conn:
-        salt_hex = conn.execute("SELECT value FROM meta WHERE key='salt'").fetchone()["value"]
-        pwd_hash = conn.execute("SELECT value FROM meta WHERE key='hash'").fetchone()["value"]
-    return bytes.fromhex(salt_hex), pwd_hash
+        meta = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM meta").fetchall()}
+    return bytes.fromhex(meta["salt"]), meta.get("verifier"), meta.get("hash")
 
 
 def add_password(title: str, username: str, encrypted_password: str, category: str,
@@ -146,6 +160,11 @@ def update_last_used(record_id: int):
     with get_connection() as conn:
         conn.execute("UPDATE passwords SET last_used_at=? WHERE id=?", (now, record_id))
         conn.commit()
+
+
+def get_password(record_id: int) -> Optional[sqlite3.Row]:
+    with get_connection() as conn:
+        return conn.execute("SELECT * FROM passwords WHERE id=?", (record_id,)).fetchone()
 
 
 def get_all_passwords(category: Optional[str] = None) -> list[sqlite3.Row]:

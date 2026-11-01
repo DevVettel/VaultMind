@@ -1,6 +1,6 @@
-import sys
 import ctypes
 import ctypes.wintypes
+import sys
 
 
 def apply_dark_titlebar(widget):

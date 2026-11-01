@@ -1,12 +1,18 @@
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QMessageBox, QFrame
-)
+from typing import Callable, Optional
+
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from PyQt5.QtWidgets import (
+    QApplication,
+    QDialog,
+    QFrame,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+)
 
 from ui.utils import apply_dark_titlebar
-
 
 STYLE = """
 QDialog {
@@ -56,10 +62,15 @@ QPushButton#primary:pressed {
 
 
 class MasterPasswordDialog(QDialog):
-    def __init__(self, is_first_launch: bool, parent=None):
+    def __init__(self, is_first_launch: bool, unlock: Callable[[str], Optional[bytes]],
+                 message: Optional[str] = None, parent=None):
+        """`unlock` receives the entered password and returns the vault key,
+        or None when the password is wrong (the dialog then stays open)."""
         super().__init__(parent)
         self.is_first_launch = is_first_launch
-        self.master_password = None
+        self._unlock = unlock
+        self._message = message
+        self.enc_key: Optional[bytes] = None
         self._build_ui()
         self.setStyleSheet(STYLE)
 
@@ -79,6 +90,8 @@ class MasterPasswordDialog(QDialog):
 
         if self.is_first_launch:
             sub = QLabel("Set up your master password to protect your vault.")
+        elif self._message:
+            sub = QLabel(self._message)
         else:
             sub = QLabel("Enter your master password to unlock your vault.")
         sub.setObjectName("subtitle")
@@ -171,7 +184,19 @@ class MasterPasswordDialog(QDialog):
                 QMessageBox.warning(self, "Error", "Master password must be at least 8 characters.")
                 return
 
-        self.master_password = password
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            key = self._unlock(password)
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        if key is None:
+            QMessageBox.warning(self, "Wrong Password", "Incorrect master password.")
+            self.pw_input.clear()
+            self.pw_input.setFocus()
+            return
+
+        self.enc_key = key
         self.accept()
 
     def showEvent(self, event):

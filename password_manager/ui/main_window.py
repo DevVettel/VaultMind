@@ -1,23 +1,41 @@
-import threading
+import os
 import webbrowser
 from datetime import datetime
-
-from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
-    QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem,
-    QToolBar, QAction, QStatusBar, QLineEdit, QLabel,
-    QMessageBox, QHeaderView, QAbstractItemView, QFrame, QApplication,
-    QPushButton, QSizePolicy
-)
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject
-from PyQt5.QtGui import QFont, QColor
+from typing import Optional
 
 import pyperclip
+from PyQt5.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QColor, QFont
+from PyQt5.QtWidgets import (
+    QAbstractItemView,
+    QAction,
+    QApplication,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QHeaderView,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QSplitter,
+    QStatusBar,
+    QTableWidget,
+    QTableWidgetItem,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
+)
 
-from core import database, encryption
+from core import backup, database, encryption, vault
 from ui.add_password_dialog import AddPasswordDialog
+from ui.master_password_dialog import MasterPasswordDialog
 from ui.utils import apply_dark_titlebar
-
 
 STYLE = """
 QMainWindow {
@@ -148,6 +166,13 @@ QPushButton#url_btn:hover {
 """
 
 
+ICON_COLUMN_WIDTH = 64
+BACKUP_FILTER = "VaultMind Backup (*.vmbackup);;All Files (*)"
+INACTIVITY_LOCK_MS = 5 * 60 * 1000
+CLIPBOARD_CLEAR_MS = 30 * 1000
+_ACTIVITY_EVENTS = (QEvent.MouseButtonPress, QEvent.KeyPress, QEvent.Wheel)
+
+
 def _cell_widget(btn: QPushButton) -> QWidget:
     container = QWidget()
     container.setStyleSheet("background: transparent;")
@@ -168,7 +193,11 @@ class MainWindow(QMainWindow):
         self.enc_key = enc_key
         self.current_category = "All"
         self.current_search = ""
-        self._clipboard_timer = None
+        self._clipboard_secret = None
+        self._clipboard_timer = QTimer(self)
+        self._clipboard_timer.setSingleShot(True)
+        self._clipboard_timer.setInterval(CLIPBOARD_CLEAR_MS)
+        self._clipboard_timer.timeout.connect(self._clear_clipboard_now)
         self._toast = None
         self._signals = _Signals()
         self._signals.lock_vault.connect(self._lock_vault)
@@ -224,8 +253,10 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
-        self.table.setColumnWidth(0, 44)
-        self.table.setColumnWidth(5, 44)
+        # Cell widgets sit inside the item padding (16px each side), so the
+        # icon columns need 32px for the button plus 2 * 16px.
+        self.table.setColumnWidth(0, ICON_COLUMN_WIDTH)
+        self.table.setColumnWidth(5, ICON_COLUMN_WIDTH)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -280,6 +311,18 @@ class MainWindow(QMainWindow):
 
         tb.addSeparator()
 
+        export_action = QAction("⇪ Export", self)
+        export_action.setToolTip("Save an encrypted backup of the whole vault")
+        export_action.triggered.connect(self._export_backup)
+        tb.addAction(export_action)
+
+        import_action = QAction("⇩ Import", self)
+        import_action.setToolTip("Restore entries from an encrypted backup")
+        import_action.triggered.connect(self._import_backup)
+        tb.addAction(import_action)
+
+        tb.addSeparator()
+
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         tb.addWidget(spacer)
@@ -295,29 +338,58 @@ class MainWindow(QMainWindow):
         tb.addWidget(self.search_box)
 
     def _setup_inactivity_timer(self):
+        self._locked = False
         self._inactivity_timer = QTimer(self)
-        self._inactivity_timer.setInterval(5 * 60 * 1000)
+        self._inactivity_timer.setInterval(INACTIVITY_LOCK_MS)
         self._inactivity_timer.timeout.connect(self._lock_vault)
         self._inactivity_timer.start()
+        # Child widgets (table, search box, dialogs) consume their own input
+        # events, so watch activity application-wide.
+        QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() in _ACTIVITY_EVENTS:
+            self._reset_inactivity()
+        return super().eventFilter(obj, event)
 
     def _reset_inactivity(self):
-        self._inactivity_timer.start()
-
-    def mousePressEvent(self, event):
-        self._reset_inactivity()
-        super().mousePressEvent(event)
-
-    def keyPressEvent(self, event):
-        self._reset_inactivity()
-        super().keyPressEvent(event)
+        if not self._locked:
+            self._inactivity_timer.start()
 
     def _lock_vault(self):
+        if self._locked:
+            return
+        self._locked = True
         self._inactivity_timer.stop()
-        QMessageBox.information(
-            self, "Vault Locked",
-            "Your vault has been locked due to inactivity.\nPlease restart to unlock."
+        self._clear_clipboard_now()
+
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, QDialog) and widget.isVisible():
+                widget.reject()
+
+        self.enc_key = None
+        QApplication.instance().setQuitOnLastWindowClosed(False)
+        self.hide()
+        QTimer.singleShot(0, self._prompt_unlock)
+
+    def _prompt_unlock(self):
+        dlg = MasterPasswordDialog(
+            is_first_launch=False,
+            unlock=vault.unlock_vault,
+            message="Your vault was locked after 5 minutes of inactivity. "
+                    "Enter your master password to continue.",
         )
-        QApplication.quit()
+        if dlg.exec_() != dlg.Accepted:
+            QApplication.quit()
+            return
+
+        self.enc_key = dlg.enc_key
+        self._locked = False
+        self.show()
+        QApplication.instance().setQuitOnLastWindowClosed(True)
+        self._refresh_sidebar()
+        self._refresh_table()
+        self._inactivity_timer.start()
 
     def _refresh_sidebar(self):
         self.category_list.blockSignals(True)
@@ -503,8 +575,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No Selection", "Please select a password to edit.")
             return
 
-        rows = database.get_all_passwords()
-        record = next((r for r in rows if r["id"] == rec_id), None)
+        record = database.get_password(rec_id)
         if record is None:
             return
 
@@ -544,40 +615,114 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No Selection", "Please select a password to copy.")
             return
 
-        rows = database.get_all_passwords()
-        record = next((r for r in rows if r["id"] == rec_id), None)
+        record = database.get_password(rec_id)
         if record is None:
             return
 
         try:
             plain = encryption.decrypt(record["encrypted_password"], self.enc_key)
-            pyperclip.copy(plain)
-            database.update_last_used(rec_id)
-            self._show_copy_toast()
-
-            if self._clipboard_timer:
-                self._clipboard_timer.cancel()
-
-            def clear_clipboard():
-                try:
-                    if pyperclip.paste() == plain:
-                        pyperclip.copy("")
-                except Exception:
-                    pass
-
-            self._clipboard_timer = threading.Timer(30, clear_clipboard)
-            self._clipboard_timer.daemon = True
-            self._clipboard_timer.start()
-
-            QTimer.singleShot(30500, lambda: self._refresh_table())
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not decrypt password:\n{e}")
+            return
+
+        try:
+            pyperclip.copy(plain)
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not access the clipboard:\n{e}")
+            return
+
+        self._clipboard_secret = plain
+        self._clipboard_timer.start()
+        database.update_last_used(rec_id)
+        self._show_copy_toast()
+        QTimer.singleShot(CLIPBOARD_CLEAR_MS + 500, self._refresh_table)
+
+    def _ask_password(self, title: str, label: str) -> Optional[str]:
+        text, ok = QInputDialog.getText(self, title, label, QLineEdit.Password)
+        return text if ok and text else None
+
+    def _export_backup(self):
+        self._reset_inactivity()
+        stamp = datetime.now().strftime("%Y-%m-%d")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Encrypted Backup",
+            os.path.join(os.path.expanduser("~"), f"vaultmind-{stamp}.vmbackup"),
+            BACKUP_FILTER,
+        )
+        if not path:
+            return
+
+        pw = self._ask_password("Backup Password",
+                                "Choose a password for this backup (min. 8 characters):")
+        if pw is None:
+            return
+        if len(pw) < 8:
+            QMessageBox.warning(self, "Error", "Backup password must be at least 8 characters.")
+            return
+        if self._ask_password("Backup Password", "Confirm backup password:") != pw:
+            QMessageBox.warning(self, "Error", "Passwords do not match.")
+            return
+
+        try:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                count = backup.export_backup(path, self.enc_key, pw)
+            finally:
+                QApplication.restoreOverrideCursor()
+        except Exception as e:
+            QMessageBox.warning(self, "Export Failed", f"Could not write backup:\n{e}")
+            return
+        QMessageBox.information(
+            self, "Export Complete",
+            f"{count} entr{'y' if count == 1 else 'ies'} exported.\n\n"
+            "Keep the backup password safe — the file cannot be opened without it."
+        )
+
+    def _import_backup(self):
+        self._reset_inactivity()
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Encrypted Backup", os.path.expanduser("~"), BACKUP_FILTER
+        )
+        if not path:
+            return
+        pw = self._ask_password("Backup Password", "Enter the password of this backup:")
+        if pw is None:
+            return
+
+        try:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                result = backup.import_backup(path, self.enc_key, pw)
+            finally:
+                QApplication.restoreOverrideCursor()
+        except backup.BackupError as e:
+            QMessageBox.warning(self, "Import Failed", str(e))
+            return
+
+        self._refresh_sidebar()
+        self._refresh_table()
+        msg = f"{result['added']} entr{'y' if result['added'] == 1 else 'ies'} imported."
+        if result["skipped"]:
+            msg += f"\n{result['skipped']} already in the vault and skipped."
+        QMessageBox.information(self, "Import Complete", msg)
+
+    def _clear_clipboard_now(self):
+        """Wipe the clipboard if it still holds the password we copied."""
+        self._clipboard_timer.stop()
+        secret, self._clipboard_secret = self._clipboard_secret, None
+        if secret is None:
+            return
+        try:
+            if pyperclip.paste() == secret:
+                pyperclip.copy("")
+        except Exception:
+            pass
 
     def showEvent(self, event):
         super().showEvent(event)
         apply_dark_titlebar(self)
 
     def closeEvent(self, event):
-        if self._clipboard_timer:
-            self._clipboard_timer.cancel()
+        self._clear_clipboard_now()
+        QApplication.instance().removeEventFilter(self)
         super().closeEvent(event)
