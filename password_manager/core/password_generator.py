@@ -1,5 +1,7 @@
-import random
+import secrets
 import string
+
+_rng = secrets.SystemRandom()
 
 
 def generate_password(
@@ -14,17 +16,17 @@ def generate_password(
 
     if use_upper:
         charset += string.ascii_uppercase
-        guaranteed.append(random.choice(string.ascii_uppercase))
+        guaranteed.append(secrets.choice(string.ascii_uppercase))
     if use_lower:
         charset += string.ascii_lowercase
-        guaranteed.append(random.choice(string.ascii_lowercase))
+        guaranteed.append(secrets.choice(string.ascii_lowercase))
     if use_digits:
         charset += string.digits
-        guaranteed.append(random.choice(string.digits))
+        guaranteed.append(secrets.choice(string.digits))
     if use_symbols:
         symbols = "!@#$%^&*()-_=+[]{}|;:,.<>?"
         charset += symbols
-        guaranteed.append(random.choice(symbols))
+        guaranteed.append(secrets.choice(symbols))
 
     if not charset:
         charset = string.ascii_letters + string.digits
@@ -34,8 +36,8 @@ def generate_password(
     if remaining < 0:
         remaining = 0
 
-    pwd_chars = guaranteed + [random.choice(charset) for _ in range(remaining)]
-    random.shuffle(pwd_chars)
+    pwd_chars = guaranteed + [secrets.choice(charset) for _ in range(remaining)]
+    _rng.shuffle(pwd_chars)
     return "".join(pwd_chars[:length])
 
 

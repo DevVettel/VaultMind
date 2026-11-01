@@ -1,14 +1,23 @@
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QComboBox, QSlider, QCheckBox, QFrame,
-    QProgressBar, QMessageBox, QSizePolicy, QTextEdit
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSlider,
+    QTextEdit,
+    QVBoxLayout,
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
 
 from core.password_generator import generate_password, password_strength
+from resources import qss_url
 from ui.utils import apply_dark_titlebar
-
 
 CATEGORIES = ["General", "Email", "Social", "Banking", "Work", "Shopping", "Other"]
 
@@ -38,7 +47,7 @@ QLineEdit:focus, QComboBox:focus {
     border: 1px solid #072182;
 }
 QLineEdit#mono {
-    font-family: Consolas, monospace;
+    font-family: "SF Mono", Menlo, Consolas, "Courier New", monospace;
     font-size: 15px;
     letter-spacing: 1px;
 }
@@ -111,13 +120,20 @@ QCheckBox {
 QCheckBox::indicator {
     width: 16px;
     height: 16px;
-    border-radius: 3px;
-    border: 1px solid #3d3d5c;
+    border-radius: 4px;
+    border: 1px solid #56567a;
     background-color: #2a2a3e;
 }
+QCheckBox::indicator:hover {
+    border-color: #5b8dee;
+}
 QCheckBox::indicator:checked {
-    background-color: #072182;
-    border-color: #072182;
+    background-color: #2f5fd0;
+    border-color: #2f5fd0;
+    image: url(__CHECK_ICON__);
+}
+QCheckBox:checked {
+    color: #e2e8f0;
 }
 QSlider::groove:horizontal {
     height: 4px;
@@ -174,10 +190,11 @@ class AddPasswordDialog(QDialog):
         self.record = record
         self.result_data = None
         self._build_ui()
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(STYLE.replace("__CHECK_ICON__", qss_url("ui", "check.svg")))
 
         if record:
             self._populate(record)
+        self._fit_height()
 
     def _build_ui(self):
         title_text = "Edit Password" if self.record else "Add Password"
@@ -391,13 +408,21 @@ class AddPasswordDialog(QDialog):
     def _use_preview(self):
         self.pw_input.setText(self.preview_field.text())
         self.gen_frame.setVisible(False)
+        self._fit_height()
 
     def _open_generator(self):
         visible = not self.gen_frame.isVisible()
         self.gen_frame.setVisible(visible)
         if visible:
             self._refresh_preview()
-        self.adjustSize()
+        self._fit_height()
+
+    def _fit_height(self):
+        # The dialog has an explicit minimum height, so Qt won't grow it on
+        # its own when the generator panel appears; the panel would be
+        # squeezed to an empty strip. Resize to the layout's needs instead.
+        self.layout().activate()
+        self.resize(self.width(), max(self.minimumHeight(), self.layout().sizeHint().height()))
 
     def _toggle_visibility(self, checked: bool):
         self.pw_input.setEchoMode(QLineEdit.Normal if checked else QLineEdit.Password)

@@ -12,6 +12,13 @@ __pycache__/
 .env
 *.key
 
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Backups (contain your passwords, encrypted)
+*.vmbackup
+
 # Virtual environments
 venv/
 .venv/
@@ -27,7 +34,7 @@ build/
 .idea/
 .vscode/
 
-# Claude Code
+# Local tool settings
 .claude/
 
 # Project internals
